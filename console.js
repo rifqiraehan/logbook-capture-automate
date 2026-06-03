@@ -4,7 +4,6 @@
   const CONFIG = {
     startWeek: 1, // Minggu Pertama Kegiatan
     endWeek: 20, // Minggu Terakhir Kegiatan
-
     delayAfterChangeMs: 4000,
     scale: 2,
 
@@ -17,7 +16,6 @@
   };
 
   const log = (...args) => console.log("[Logbook]", ...args);
-  const warn = (...args) => console.warn("[Logbook]", ...args);
   const error = (...args) => console.error("[Logbook]", ...args);
   const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
@@ -117,12 +115,12 @@
       "boxSizing"
     ];
 
-    const sources = [sourceRoot, ...sourceRoot.querySelectorAll("*")];
-    const clones = [cloneRoot, ...cloneRoot.querySelectorAll("*")];
+    const sourceNodes = [sourceRoot, ...sourceRoot.querySelectorAll("*")];
+    const cloneNodes = [cloneRoot, ...cloneRoot.querySelectorAll("*")];
 
-    for (let i = 0; i < sources.length; i++) {
-      const source = sources[i];
-      const clone = clones[i];
+    for (let i = 0; i < sourceNodes.length; i++) {
+      const source = sourceNodes[i];
+      const clone = cloneNodes[i];
       if (!source || !clone) continue;
 
       const cs = getComputedStyle(source);
@@ -130,20 +128,19 @@
       for (const prop of props) {
         try {
           clone.style[prop] = cs[prop];
-        } catch (_) { }
+        } catch (_) {}
       }
     }
   }
 
-  function mirrorRenderedSize(source, clone) {
-    const rect = source.getBoundingClientRect();
+  function mirrorTableSizeOnly(sourceTable, cloneTable) {
+    const rect = sourceTable.getBoundingClientRect();
 
-    clone.removeAttribute("width");
-
-    clone.style.width = px(rect.width);
-    clone.style.height = px(rect.height);
-    clone.style.margin = "0";
-    clone.style.display = "table";
+    cloneTable.removeAttribute("width");
+    cloneTable.style.width = px(rect.width);
+    cloneTable.style.margin = "0";
+    cloneTable.style.display = "table";
+    cloneTable.style.height = "auto";
   }
 
   function mirrorCellSizes(sourceTable, cloneTable) {
@@ -157,12 +154,14 @@
       for (let c = 0; c < sourceCells.length; c++) {
         const sourceCell = sourceCells[c];
         const cloneCell = cloneCells[c];
+
         if (!sourceCell || !cloneCell) continue;
 
         const rect = sourceCell.getBoundingClientRect();
 
         cloneCell.style.width = px(rect.width);
-        cloneCell.style.height = px(rect.height);
+        cloneCell.style.height = "auto";
+        cloneCell.style.boxSizing = "border-box";
       }
     }
   }
@@ -176,7 +175,6 @@
       const cloneCell = cloneRows[r]?.cells?.[4];
 
       if (!sourceCell || !cloneCell) continue;
-
       if ((sourceCell.colSpan || 1) > 1) continue;
 
       const rect = sourceCell.getBoundingClientRect();
@@ -188,6 +186,7 @@
       cloneCell.style.whiteSpace = "normal";
       cloneCell.style.wordBreak = "normal";
       cloneCell.style.overflowWrap = "break-word";
+      cloneCell.style.boxSizing = "border-box";
     }
   }
 
@@ -195,22 +194,19 @@
     const dropdownClone = dropdownTable.cloneNode(true);
     const logbookClone = logbookTable.cloneNode(true);
 
+    dropdownClone.dataset.captureChild = "dropdown";
+    logbookClone.dataset.captureChild = "logbook";
+
     copyImportantComputedStyles(dropdownTable, dropdownClone);
     copyImportantComputedStyles(logbookTable, logbookClone);
 
-    mirrorRenderedSize(dropdownTable, dropdownClone);
-    mirrorRenderedSize(logbookTable, logbookClone);
+    mirrorTableSizeOnly(dropdownTable, dropdownClone);
+    mirrorTableSizeOnly(logbookTable, logbookClone);
 
     mirrorCellSizes(dropdownTable, dropdownClone);
     mirrorCellSizes(logbookTable, logbookClone);
 
     protectKegiatanColumn(logbookTable, logbookClone);
-
-    const dropdownRect = dropdownTable.getBoundingClientRect();
-    const logbookRect = logbookTable.getBoundingClientRect();
-
-    const width = Math.ceil(Math.max(dropdownRect.width, logbookRect.width));
-    const height = Math.ceil(dropdownRect.height + logbookRect.height);
 
     const root = document.createElement("div");
     root.dataset.logbookCaptureRoot = "true";
@@ -220,14 +216,16 @@
       left: "0",
       top: "0",
       zIndex: "2147483647",
-      width: px(width),
-      height: px(height),
+      display: "inline-block",
       margin: "0",
       padding: "0",
       border: "0",
       background: "#ffffff",
-      overflow: "hidden",
-      pointerEvents: "none"
+      overflow: "visible",
+      pointerEvents: "none",
+      boxSizing: "border-box",
+      width: "auto",
+      height: "auto"
     });
 
     root.appendChild(dropdownClone);
@@ -236,6 +234,24 @@
     document.body.appendChild(root);
 
     return root;
+  }
+
+  function getTightBounds(root) {
+    const children = Array.from(root.querySelectorAll("[data-capture-child]"));
+
+    const rects = children.map((el) => el.getBoundingClientRect());
+
+    const left = Math.min(...rects.map((r) => r.left));
+    const top = Math.min(...rects.map((r) => r.top));
+    const right = Math.max(...rects.map((r) => r.right));
+    const bottom = Math.max(...rects.map((r) => r.bottom));
+
+    return {
+      left,
+      top,
+      width: Math.ceil(right - left),
+      height: Math.ceil(bottom - top)
+    };
   }
 
   async function waitForImages(root) {
@@ -254,15 +270,8 @@
   }
 
   async function screenshotCurrentWeek(week, userSlug) {
-    const dropdownTable = qs(
-      CONFIG.selectorDropdownTable,
-      "Tabel dropdown minggu"
-    );
-
-    const logbookTable = qs(
-      CONFIG.selectorLogbookTable,
-      "Tabel data logbook"
-    );
+    const dropdownTable = qs(CONFIG.selectorDropdownTable, "Tabel dropdown minggu");
+    const logbookTable = qs(CONFIG.selectorLogbookTable, "Tabel data logbook");
 
     let root = null;
 
@@ -271,8 +280,9 @@
 
       await new Promise((resolve) => requestAnimationFrame(resolve));
       await waitForImages(root);
+      await new Promise((resolve) => requestAnimationFrame(resolve));
 
-      const rect = root.getBoundingClientRect();
+      const bounds = getTightBounds(root);
 
       const canvas = await html2canvas(root, {
         backgroundColor: "#ffffff",
@@ -281,13 +291,15 @@
         allowTaint: false,
         logging: CONFIG.debug,
 
-        width: Math.ceil(rect.width),
-        height: Math.ceil(rect.height),
+        x: 0,
+        y: 0,
+        width: bounds.width,
+        height: bounds.height,
 
         scrollX: 0,
         scrollY: 0,
-        windowWidth: Math.max(document.documentElement.clientWidth, Math.ceil(rect.width)),
-        windowHeight: Math.max(document.documentElement.clientHeight, Math.ceil(rect.height)),
+        windowWidth: Math.max(document.documentElement.clientWidth, bounds.width),
+        windowHeight: Math.max(document.documentElement.clientHeight, bounds.height),
 
         onclone: (clonedDocument) => {
           const clonedRoot = clonedDocument.querySelector(
@@ -298,6 +310,11 @@
 
           clonedRoot.style.left = "0";
           clonedRoot.style.top = "0";
+          clonedRoot.style.width = "auto";
+          clonedRoot.style.height = "auto";
+          clonedRoot.style.padding = "0";
+          clonedRoot.style.margin = "0";
+          clonedRoot.style.overflow = "visible";
           clonedRoot.style.transform = "none";
         }
       });
@@ -344,7 +361,7 @@
         log(`Minggu ${week}: mengambil screenshot...`);
         await screenshotCurrentWeek(week, userSlug);
 
-        log(`Berhasil screenshot minggu ${week}`);
+        log(`Berhasil mengambil screenshot minggu ${week}`);
       } catch (err) {
         error(`Gagal screenshot minggu ${week}:`, err);
       }
